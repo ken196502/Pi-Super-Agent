@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# setup.sh — install and configure the Pi Super-Agent on Linux.
+# setup.sh — install and configure the Pi-Super-Agent on Linux.
 #
 # It asks for the Telegram bot token and your Telegram user ID first, then
 # installs only the missing pieces (tmux, Node.js >= 22.19, Pi), verifies the
@@ -13,14 +13,17 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source_repo_dir="$repo_dir"
+REPO_URL="https://github.com/ken196502/Pi-Super-Agent"
+PIPELINES_URL="https://github.com/ken196502/pipelines"
 MIN_NODE="22.19.0"
 PI_INSTALL_URL="https://pi.dev/install.sh"
 
-WORKSPACE="$HOME"
+WORKSPACE="$HOME/workspace"
 DRY_RUN=false
 FORCE_ENV=false
 FORCE_PROMPT=false
-WITH_CRON=false
+WITH_CRON=true
 SKIP_PACKAGES=false
 CRON_INTERVAL=20
 
@@ -40,7 +43,7 @@ die()  { printf '%s[error]%s %s\n' "$C_ERR" "$C_RESET" "$*" >&2; exit 1; }
 
 usage() {
   cat <<'EOF'
-setup.sh — install and configure the Pi Super-Agent on Linux.
+setup.sh — install and configure the Pi-Super-Agent on Linux.
 
 Usage:
   ./setup.sh [options]
@@ -50,12 +53,13 @@ user ID before installing anything. In a non-interactive shell, set
 PI_TG_BOT_TOKEN and PI_TG_USER_ID instead.
 
 Options:
-  --workspace <dir>     Pi working directory (default: $HOME)
+  --workspace <dir>     Pi working directory (default: $HOME/workspace)
   --dry-run             print every action; write and start nothing
   --force-env           replace an existing .env (a timestamped backup is kept)
   --force-prompt        replace a differing ~/.pi/agent/APPEND_SYSTEM.md
                         (a timestamped backup is kept)
-  --with-cron           install a crontab entry for scripts/tmux-inspect.sh
+  --with-cron           install the inspection cron entry (default)
+  --without-cron        skip installing the inspection cron entry
   --cron-interval <n>   inspection interval in minutes (default: 20)
   --skip-packages       do not install tmux, Node.js, Pi or npm dependencies;
                         fail if a required command is missing
@@ -74,6 +78,7 @@ while (( $# )); do
     --force-env) FORCE_ENV=true; shift ;;
     --force-prompt) FORCE_PROMPT=true; shift ;;
     --with-cron) WITH_CRON=true; shift ;;
+    --without-cron) WITH_CRON=false; shift ;;
     --skip-packages) SKIP_PACKAGES=true; shift ;;
     --workspace)
       [ "$#" -ge 2 ] || die "--workspace needs a directory"
@@ -92,8 +97,7 @@ case "$WORKSPACE" in
   "~")   WORKSPACE="$HOME" ;;
   "~/"*) WORKSPACE="$HOME/${WORKSPACE#\~/}" ;;
 esac
-[ -d "$WORKSPACE" ] || die "workspace is not a directory: $WORKSPACE"
-[ -w "$WORKSPACE" ] || die "workspace is not writable: $WORKSPACE"
+WORKSPACE="$(realpath -m "$WORKSPACE")"
 
 # ── 1. credentials (before anything is installed) ────────────────────────────
 prompt_credentials() {
@@ -201,9 +205,10 @@ ensure_base_tools() {
   command -v tmux >/dev/null 2>&1 || need+=(tmux)
   command -v curl >/dev/null 2>&1 || need+=(curl)
   command -v xz >/dev/null 2>&1 || need+=(xz)
+  command -v git >/dev/null 2>&1 || need+=(git)
 
   if (( ${#need[@]} == 0 )); then
-    ok "tmux, curl and xz are already installed"
+    ok "tmux, curl, xz and git are already installed"
     return
   fi
 
@@ -282,12 +287,51 @@ ensure_pi() {
   ok "pi $(pi --version 2>/dev/null || echo unknown) ($(command -v pi))"
 }
 
+prepare_repositories() {
+  command -v git >/dev/null 2>&1 || $DRY_RUN || die "git is required; install it and re-run"
+  local destination="$HOME/.pi/Pi-Super-Agent"
+  run mkdir -p "$HOME/.pi"
+  if [ -d "$destination/.git" ]; then
+    ok "repository already exists: $destination"
+  else
+    run git clone "$REPO_URL" "$destination"
+  fi
+  repo_dir="$destination"
+
+  run mkdir -p "$WORKSPACE"
+  if ! $DRY_RUN; then
+    [ -w "$WORKSPACE" ] || die "workspace is not writable: $WORKSPACE"
+  fi
+  if command -v mountpoint >/dev/null 2>&1 && mountpoint -q "$WORKSPACE"; then
+    ok "workspace is already mounted: $WORKSPACE"
+  else
+    info "trying to mount VM share 'workspace' at $WORKSPACE"
+    local share_type mounted=false
+    for share_type in virtiofs 9p vboxsf; do
+      local -a options=()
+      [ "$share_type" != 9p ] || options=(-o trans=virtio,version=9p2000.L)
+      if run $SUDO mount -t "$share_type" "${options[@]}" workspace "$WORKSPACE"; then
+        mounted=true
+        break
+      fi
+    done
+    if ! $mounted; then
+      warn "VM share mount failed; continuing with local workspace $WORKSPACE"
+    fi
+  fi
+  if [ -d "$WORKSPACE/pipelines/.git" ]; then
+    ok "pipelines repository already exists: $WORKSPACE/pipelines"
+  else
+    run git clone "$PIPELINES_URL" "$WORKSPACE/pipelines"
+  fi
+}
+
 install_dependencies() {
   if $SKIP_PACKAGES; then
     info "skipping npm dependencies (--skip-packages)"
     return
   fi
-  [ -f "$repo_dir/package-lock.json" ] || die "missing $repo_dir/package-lock.json; cannot run npm ci"
+  $DRY_RUN || [ -f "$repo_dir/package-lock.json" ] || die "missing $repo_dir/package-lock.json; cannot run npm ci"
   info "installing npm dependencies with npm ci"
   run_in "$repo_dir" npm ci --no-audit --no-fund
 }
@@ -381,6 +425,9 @@ install_prompt() {
   local src="$repo_dir/config/APPEND_SYSTEM.md"
   local dest="$HOME/.pi/agent/APPEND_SYSTEM.md"
 
+  if $DRY_RUN && [ ! -f "$src" ]; then
+    src="$source_repo_dir/config/APPEND_SYSTEM.md"
+  fi
   [ -f "$src" ] || die "missing prompt template: $src"
 
   if [ -f "$dest" ]; then
@@ -426,21 +473,25 @@ check_opencode() {
   warn "or customize config/APPEND_SYSTEM.md to use another coding CLI."
 }
 
-# ── 8. optional cron entry ───────────────────────────────────────────────────
+# ── 8. cron entry ───────────────────────────────────────────────────
 install_cron() {
   $WITH_CRON || return 0
 
-  command -v crontab >/dev/null 2>&1 || die "--with-cron was given but crontab is not installed"
+  command -v crontab >/dev/null 2>&1 || die "cron installation is enabled but crontab is not installed; install cron or use --without-cron"
   local script="$repo_dir/scripts/tmux-inspect.sh"
-  [ -x "$script" ] || die "$script is not executable"
+  $DRY_RUN || [ -x "$script" ] || die "$script is not executable"
 
   local existing line
+  line="*/$CRON_INTERVAL * * * * $script >/dev/null 2>&1"
   existing="$(crontab -l 2>/dev/null || true)"
+  if printf '%s\n' "$existing" | grep -Fxq "$line"; then
+    ok "inspection crontab entry is already installed"
+    return
+  fi
   if printf '%s\n' "$existing" | grep -Fq "$script"; then
-    die "crontab already contains an entry for $script; remove it before re-running with --with-cron"
+    die "crontab already contains an entry for $script; remove it before changing the inspection schedule"
   fi
 
-  line="*/$CRON_INTERVAL * * * * $script >/dev/null 2>&1"
   if $DRY_RUN; then
     info "[dry-run] would add crontab entry: $line"
     return
@@ -463,7 +514,7 @@ start_services() {
 }
 
 main() {
-  info "Pi Super-Agent setup"
+  info "Pi-Super-Agent setup"
   prompt_credentials
   detect_system
 
@@ -474,6 +525,7 @@ main() {
   fi
   ensure_node
   ensure_pi
+  prepare_repositories
   install_dependencies
 
   verify_token
@@ -489,7 +541,7 @@ main() {
   fi
   ok "setup complete"
   info "Pi:      tmux attach -t pi"
-  info "gateway: tmux attach -t pi-telegram-gateway"
+  info "gateway: tmux attach -t pi-super-agent-gateway"
   info "inspect: $repo_dir/scripts/tmux-inspect.sh --dry-run"
 }
 

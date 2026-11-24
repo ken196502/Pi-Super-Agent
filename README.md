@@ -1,4 +1,4 @@
-# Pi Super-Agent
+# Pi-Super-Agent
 
 A Super-Agent built on [Pi](https://pi.dev), tmux and a Telegram bot.
 
@@ -13,7 +13,7 @@ Any coding CLI can be substituted; see [Coding CLIs](#coding-clis).
 ## Architecture
 
 ```
-Telegram user ──► Telegram Bot API ──► gateway (tmux: pi-telegram-gateway)
+Telegram user ──► Telegram Bot API ──► gateway (tmux: pi-super-agent-gateway)
                                           │  WebSocket /inbound
                                           ▼
                                  Pi TUI (tmux: pi) + extensions/telegram-mirror.mjs
@@ -48,8 +48,8 @@ pacman, zypper or apk), `sudo` unless running as root, and a Telegram bot
 created with [@BotFather](https://t.me/BotFather).
 
 ```bash
-git clone https://github.com/ken196502/pi-telegram-server.git
-cd pi-telegram-server
+git clone https://github.com/ken196502/Pi-Super-Agent.git
+cd Pi-Super-Agent
 ./setup.sh
 ```
 
@@ -60,7 +60,13 @@ cd pi-telegram-server
    reported by a bot such as `@userinfobot` if you do not know it).
 
 It then detects the distribution and installs only what is missing: tmux,
-Node.js >= 22.19, Pi, and the npm dependencies. It verifies the token with
+curl, xz, git, Node.js >= 22.19, and Pi. It clones this repository into
+`~/.pi/Pi-Super-Agent`, creates `~/workspace` (or `--workspace`), and tries
+to mount the VM share named `workspace` there using virtiofs, 9p, then vboxsf.
+If all mount attempts fail, setup continues with the local directory. It clones
+`https://github.com/ken196502/pipelines` into `<workspace>/pipelines`, reusing
+existing clones on subsequent runs, and installs the gateway's npm dependencies
+in `~/.pi/Pi-Super-Agent`. It verifies the token with
 `getMe` **before** writing `.env`, writes `.env` with mode 600, installs
 `config/APPEND_SYSTEM.md` to `~/.pi/agent/APPEND_SYSTEM.md`, warns if OpenCode
 is missing, and starts the gateway and Pi in tmux.
@@ -78,11 +84,12 @@ user ID.
 
 | Option | Meaning |
 | --- | --- |
-| `--workspace <dir>` | Pi working directory (default `$HOME`) |
+| `--workspace <dir>` | Pi working directory, created if missing (default `$HOME/workspace`) |
 | `--dry-run` | Print every action; write and start nothing |
 | `--force-env` | Replace an existing `.env` (timestamped backup first) |
 | `--force-prompt` | Replace a differing `~/.pi/agent/APPEND_SYSTEM.md` (backup first) |
-| `--with-cron` | Install the inspection cron entry |
+| `--with-cron` | Install the inspection cron entry (default) |
+| `--without-cron` | Skip installing the inspection cron entry |
 | `--cron-interval <n>` | Inspection interval in minutes (default 20) |
 | `--skip-packages` | Do not install tmux/Node.js/Pi/npm deps; fail if a command is missing |
 
@@ -136,7 +143,9 @@ command when it is missing.
 gateway webhook. The reminder asks Pi to inspect every tmux session, repair
 failures by dispatching the coding CLI (plan first, then execute), avoid
 re-running tasks blocked by external causes, and update the daily task document
-only when something changed.
+only when something changed. The prompt also requires Pi to record every coding
+task immediately when received, dispatched, or observed completed, including
+failures and blockers, in `<workspace>/Docs/YYYYMMDD-daily-tasks.md`.
 
 ```bash
 scripts/tmux-inspect.sh --dry-run   # snapshot, busy decision, target, payload
@@ -153,23 +162,24 @@ A failed webhook POST is not hidden: the HTTP code and error are logged, the
 script prints them, and it exits non-zero. There is no `tmux send-keys`
 fallback.
 
-Install the cron entry (refuses to add a duplicate):
+Setup installs the cron entry by default and reuses an identical entry. Cron
+must be installed and running. Use `--without-cron` to skip installation:
 
 ```bash
-./setup.sh --with-cron --cron-interval 20
+./setup.sh --cron-interval 20
 ```
 
 The entry runs every 20 minutes by default:
 
 ```
-*/20 * * * * /path/to/pi-telegram-server/scripts/tmux-inspect.sh >/dev/null 2>&1
+*/20 * * * * /path/to/Pi-Super-Agent/scripts/tmux-inspect.sh >/dev/null 2>&1
 ```
 
 ## Operating
 
 ```bash
 tmux attach -t pi                    # Pi TUI
-tmux attach -t pi-telegram-gateway   # gateway console
+tmux attach -t pi-super-agent-gateway   # gateway console
 tmux ls                              # all sessions, including coding tasks
 curl -s http://127.0.0.1:3093/health # bot status, counters, inbound registration
 tail -f gateway.log                  # gateway log
@@ -181,7 +191,7 @@ Restart or start both services with:
 scripts/start.sh --workspace "$HOME"
 ```
 
-`scripts/start.sh` starts the gateway in `pi-telegram-gateway` and Pi in `pi`,
+`scripts/start.sh` starts the gateway in `pi-super-agent-gateway` and Pi in `pi`,
 waits up to 45 seconds for `/health` to report `main` connected, and exits
 non-zero with the reason on timeout. It leaves already-running sessions alone
 and says so. Only explicitly set proxy variables are passed to the gateway;

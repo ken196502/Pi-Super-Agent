@@ -3,7 +3,7 @@
 #
 #   scripts/start.sh [--workspace <dir>] [--dry-run]
 #
-# The gateway runs in the tmux session "pi-telegram-gateway"; Pi runs in "pi"
+# The gateway runs in the tmux session "pi-super-agent-gateway"; Pi runs in "pi"
 # with extensions/telegram-mirror.mjs loaded. Existing sessions are left alone.
 # Only explicitly configured proxy variables are passed to the gateway.
 set -euo pipefail
@@ -16,7 +16,7 @@ usage: scripts/start.sh [--workspace <dir>] [--dry-run]
   --dry-run          print the resolved plan and start nothing
   -h, --help         show this help
 
-Starts the gateway in tmux "pi-telegram-gateway" and Pi in tmux "pi", then
+Starts the gateway in tmux "pi-super-agent-gateway" and Pi in tmux "pi", then
 waits for /health to report the "main" bot connected. A timeout exits non-zero.
 EOF
 }
@@ -50,7 +50,7 @@ command -v pi >/dev/null 2>&1 || {
   exit 1
 }
 
-gateway_session="pi-telegram-gateway"
+gateway_session="pi-super-agent-gateway"
 pi_session="pi"
 
 # Explicit proxy settings only. Nothing is auto-detected or guessed.

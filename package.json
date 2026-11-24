@@ -1,8 +1,8 @@
 {
-  "name": "pi-telegram-service",
+  "name": "pi-super-agent",
   "version": "0.1.0",
   "private": false,
-  "description": "A Pi Super-Agent: a Telegram gateway that dispatches coding CLIs in tmux, inspects them on a schedule, and reports back.",
+  "description": "A Pi-Super-Agent: a Telegram gateway that dispatches coding CLIs in tmux, inspects them on a schedule, and reports back.",
   "type": "module",
   "keywords": [
     "pi-coding-agent",

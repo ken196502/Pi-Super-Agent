@@ -61,8 +61,8 @@ fi
 # A standalone Pi launch must bring up the shared gateway before the extension
 # attempts its WebSocket registration.
 if ! node "$repo_dir/scripts/check-telegram-ready.mjs" listening "$bot"; then
-  if tmux has-session -t '=pi-telegram-gateway' 2>/dev/null; then
-    echo "Gateway tmux session exists but its HTTP service is unavailable; inspect it with: tmux attach -t pi-telegram-gateway" >&2
+  if tmux has-session -t '=pi-super-agent-gateway' 2>/dev/null; then
+    echo "Gateway tmux session exists but its HTTP service is unavailable; inspect it with: tmux attach -t pi-super-agent-gateway" >&2
     exit 1
   fi
 
@@ -75,8 +75,8 @@ if ! node "$repo_dir/scripts/check-telegram-ready.mjs" listening "$bot"; then
 
   printf -v gateway_command '%q ' env "${gateway_env[@]}" node "$repo_dir/src/gateway.mjs"
   printf -v gateway_log '%q' "$repo_dir/gateway.log"
-  tmux new-session -d -s pi-telegram-gateway -c "$repo_dir" "exec $gateway_command >>$gateway_log 2>&1"
-  echo "Started Telegram gateway in tmux session 'pi-telegram-gateway' (log: $repo_dir/gateway.log)" >&2
+  tmux new-session -d -s pi-super-agent-gateway -c "$repo_dir" "exec $gateway_command >>$gateway_log 2>&1"
+  echo "Started Telegram gateway in tmux session 'pi-super-agent-gateway' (log: $repo_dir/gateway.log)" >&2
 fi
 
 gateway_ready=0
@@ -88,7 +88,7 @@ for ((attempt=0; attempt<45; attempt++)); do
   sleep 1
 done
 if (( ! gateway_ready )); then
-  echo "Gateway did not become ready. Inspect with: tmux attach -t pi-telegram-gateway (log: $repo_dir/gateway.log)" >&2
+  echo "Gateway did not become ready. Inspect with: tmux attach -t pi-super-agent-gateway (log: $repo_dir/gateway.log)" >&2
   exit 1
 fi
 
